@@ -1,137 +1,329 @@
-import sqlite3 from 'sqlite3';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.VERCEL
-  ? '/tmp/database.sqlite'
-  : path.resolve(__dirname, 'database.sqlite');
+  ? '/tmp/database.json'
+  : path.resolve(__dirname, 'database.json');
 
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error connecting to SQLite database:', err);
-  } else {
-    console.log('Connected to SQLite database at:', dbPath);
+// Global Database State
+let dbData = {
+  users: [],
+  posts: [],
+  comments: []
+};
+
+// Synchronous Load
+const loadData = () => {
+  try {
+    if (fs.existsSync(dbPath)) {
+      const content = fs.readFileSync(dbPath, 'utf8');
+      dbData = JSON.parse(content);
+    }
+  } catch (err) {
+    console.error('Error loading database file, initializing empty:', err);
   }
-});
+};
 
-// Enable foreign keys
-db.run('PRAGMA foreign_keys = ON');
+// Synchronous Save
+const saveData = () => {
+  try {
+    fs.writeFileSync(dbPath, JSON.stringify(dbData, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error saving database file:', err);
+  }
+};
 
-// Promise-based wrappers for SQLite operations
+// Promise-based wrappers mimicking SQLite
 export const dbRun = (query, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.run(query, params, function (err) {
-      if (err) reject(err);
-      else resolve({ id: this.lastID, changes: this.changes });
-    });
+  return new Promise((resolve) => {
+    loadData();
+
+    // 1. Insert User
+    if (query.trim().startsWith('INSERT INTO users')) {
+      const id = dbData.users.length + 1;
+      const [username, email, password_hash, avatar_color] = params;
+      const user = {
+        id,
+        username,
+        email,
+        password_hash,
+        avatar_color,
+        created_at: new Date().toISOString()
+      };
+      dbData.users.push(user);
+      saveData();
+      resolve({ id, changes: 1 });
+      return;
+    }
+
+    // 2. Insert Post
+    if (query.trim().startsWith('INSERT INTO posts')) {
+      const id = dbData.posts.length + 1;
+      const [title, summary, content, cover_image, category, author_id] = params;
+      const post = {
+        id,
+        title,
+        summary,
+        content,
+        cover_image,
+        category,
+        author_id: Number(author_id),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      dbData.posts.push(post);
+      saveData();
+      resolve({ id, changes: 1 });
+      return;
+    }
+
+    // 3. Update Post
+    if (query.trim().startsWith('UPDATE posts')) {
+      const [title, summary, content, cover_image, category, id] = params;
+      const post = dbData.posts.find(p => p.id === Number(id));
+      if (post) {
+        post.title = title;
+        post.summary = summary;
+        post.content = content;
+        post.cover_image = cover_image;
+        post.category = category;
+        post.updated_at = new Date().toISOString();
+        saveData();
+      }
+      resolve({ changes: post ? 1 : 0 });
+      return;
+    }
+
+    // 4. Delete Post
+    if (query.trim().startsWith('DELETE FROM posts')) {
+      const [id] = params;
+      const initialLength = dbData.posts.length;
+      dbData.posts = dbData.posts.filter(p => p.id !== Number(id));
+      // Cascade delete comments
+      dbData.comments = dbData.comments.filter(c => c.post_id !== Number(id));
+      saveData();
+      resolve({ changes: initialLength - dbData.posts.length });
+      return;
+    }
+
+    // 5. Insert Comment
+    if (query.trim().startsWith('INSERT INTO comments')) {
+      const id = dbData.comments.length + 1;
+      const [content, post_id, author_id] = params;
+      const comment = {
+        id,
+        content,
+        post_id: Number(post_id),
+        author_id: Number(author_id),
+        created_at: new Date().toISOString()
+      };
+      dbData.comments.push(comment);
+      saveData();
+      resolve({ id, changes: 1 });
+      return;
+    }
+
+    // 6. Delete Comment
+    if (query.trim().startsWith('DELETE FROM comments')) {
+      const [id] = params;
+      const initialLength = dbData.comments.length;
+      dbData.comments = dbData.comments.filter(c => c.id !== Number(id));
+      saveData();
+      resolve({ changes: initialLength - dbData.comments.length });
+      return;
+    }
+
+    // Default resolve
+    resolve({ id: 0, changes: 0 });
   });
 };
 
 export const dbGet = (query, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.get(query, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
+  return new Promise((resolve) => {
+    loadData();
+
+    // 1. Get User Count (used by Seeder)
+    if (query.includes('SELECT COUNT(*) as count FROM users')) {
+      resolve({ count: dbData.users.length });
+      return;
+    }
+
+    // 2. Select User by username check (registration check)
+    if (query.includes('SELECT id FROM users WHERE username = ?')) {
+      const [username] = params;
+      const user = dbData.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+      resolve(user ? { id: user.id } : null);
+      return;
+    }
+
+    // 3. Select User by email check (registration check)
+    if (query.includes('SELECT id FROM users WHERE email = ?')) {
+      const [email] = params;
+      const user = dbData.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      resolve(user ? { id: user.id } : null);
+      return;
+    }
+
+    // 4. Select User by login credential (email or username)
+    if (query.includes('SELECT * FROM users WHERE email = ? OR username = ?')) {
+      const [emailOrUsername] = params;
+      const user = dbData.users.find(u =>
+        u.email.toLowerCase() === emailOrUsername.toLowerCase() ||
+        u.username.toLowerCase() === emailOrUsername.toLowerCase()
+      );
+      resolve(user || null);
+      return;
+    }
+
+    // 5. Select User profile by id
+    if (query.includes('FROM users WHERE id = ?')) {
+      const [id] = params;
+      const user = dbData.users.find(u => u.id === Number(id));
+      resolve(user || null);
+      return;
+    }
+
+    // 6. Select Post ownership check
+    if (query.includes('SELECT author_id FROM posts WHERE id = ?')) {
+      const [id] = params;
+      const post = dbData.posts.find(p => p.id === Number(id));
+      resolve(post ? { author_id: post.author_id } : null);
+      return;
+    }
+
+    // 7. Get Single Post details (Join with author)
+    if (query.includes('FROM posts') && query.includes('JOIN users') && query.includes('posts.id = ?')) {
+      const [id] = params;
+      const post = dbData.posts.find(p => p.id === Number(id));
+      if (!post) {
+        resolve(null);
+        return;
+      }
+      const author = dbData.users.find(u => u.id === post.author_id) || {};
+      resolve({
+        ...post,
+        author_name: author.username,
+        author_avatar_color: author.avatar_color
+      });
+      return;
+    }
+
+    // Default resolve
+    resolve(null);
   });
 };
 
 export const dbAll = (query, params = []) => {
-  return new Promise((resolve, reject) => {
-    db.all(query, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
+  return new Promise((resolve) => {
+    loadData();
+
+    // 1. Get All Posts (Join with author + filters + sorting)
+    if (query.includes('FROM posts') && query.includes('JOIN users')) {
+      let result = dbData.posts.map(p => {
+        const author = dbData.users.find(u => u.id === p.author_id) || {};
+        return {
+          ...p,
+          author_name: author.username,
+          author_avatar_color: author.avatar_color
+        };
+      });
+
+      // Filter: Category
+      if (query.includes('posts.category = ?')) {
+        const catIdx = query.indexOf('posts.category = ?') > -1 ? params[0] : null;
+        if (catIdx) {
+          result = result.filter(r => r.category === catIdx);
+        }
+      }
+
+      // Filter: Author
+      if (query.includes('posts.author_id = ?')) {
+        // Find index of authorId param
+        const authorParamIdx = query.includes('posts.category = ?') ? 1 : 0;
+        const authorId = params[authorParamIdx];
+        if (authorId) {
+          result = result.filter(r => r.author_id === Number(authorId));
+        }
+      }
+
+      // Filter: Search Term
+      if (query.includes('posts.title LIKE ?')) {
+        // Search matches title, summary, or content
+        const searchParam = params[params.length - 1]; // Search params are pushed at the end
+        if (searchParam) {
+          const term = searchParam.replace(/%/g, '').toLowerCase();
+          result = result.filter(r =>
+            r.title.toLowerCase().includes(term) ||
+            r.summary.toLowerCase().includes(term) ||
+            r.content.toLowerCase().includes(term)
+          );
+        }
+      }
+
+      // Order: created_at DESC
+      result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      resolve(result);
+      return;
+    }
+
+    // 2. Get Associated Comments (Join with author)
+    if (query.includes('FROM comments') && query.includes('JOIN users')) {
+      const [postId] = params;
+      let result = dbData.comments
+        .filter(c => c.post_id === Number(postId))
+        .map(c => {
+          const author = dbData.users.find(u => u.id === c.author_id) || {};
+          return {
+            ...c,
+            author_name: author.username,
+            author_avatar_color: author.avatar_color
+          };
+        });
+
+      // Order: created_at DESC
+      result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+      resolve(result);
+      return;
+    }
+
+    // Default resolve
+    resolve([]);
   });
 };
 
-// Initialize database schema
+// Initialize database schema (Creates seed JSON if empty)
 export const initDb = async () => {
-  try {
-    // Create Users Table
-    await dbRun(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        email TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        avatar_color TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // Create Posts Table
-    await dbRun(`
-      CREATE TABLE IF NOT EXISTS posts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL,
-        summary TEXT NOT NULL,
-        content TEXT NOT NULL,
-        cover_image TEXT,
-        category TEXT NOT NULL,
-        author_id INTEGER NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(author_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-
-    // Create Comments Table
-    await dbRun(`
-      CREATE TABLE IF NOT EXISTS comments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        content TEXT NOT NULL,
-        post_id INTEGER NOT NULL,
-        author_id INTEGER NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(post_id) REFERENCES posts(id) ON DELETE CASCADE,
-        FOREIGN KEY(author_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-
-    console.log('Database tables verified/created successfully.');
-    await seedData();
-  } catch (error) {
-    console.error('Error during database initialization:', error);
-  }
+  loadData();
+  console.log('JSON Database loaded from:', dbPath);
+  await seedData();
 };
 
-// Seed Mock Data if database is empty
 const seedData = async () => {
   try {
-    // Check if we already have users
-    const userCount = await dbGet('SELECT COUNT(*) as count FROM users');
-    if (userCount.count > 0) {
+    if (dbData.users.length > 0) {
       console.log('Database already has data. Skipping seeding.');
       return;
     }
 
-    console.log('Seeding initial mock data...');
+    console.log('Seeding initial mock data to JSON...');
 
-    // Hash passwords
     const passwordHash = await bcrypt.hash('password123', 10);
 
-    // Create seed users
+    // Seed Users
     const users = [
-      { username: 'john_developer', email: 'john@example.com', password_hash: passwordHash, avatar_color: '220, 90%, 65%' }, // Blue
-      { username: 'creative_sarah', email: 'sarah@example.com', password_hash: passwordHash, avatar_color: '330, 85%, 65%' }, // Pink
-      { username: 'tech_guru', email: 'guru@example.com', password_hash: passwordHash, avatar_color: '150, 75%, 45%' },     // Green
+      { id: 1, username: 'john_developer', email: 'john@example.com', password_hash: passwordHash, avatar_color: '220, 90%, 65%' },
+      { id: 2, username: 'creative_sarah', email: 'sarah@example.com', password_hash: passwordHash, avatar_color: '330, 85%, 65%' },
+      { id: 3, username: 'tech_guru', email: 'guru@example.com', password_hash: passwordHash, avatar_color: '150, 75%, 45%' },
     ];
+    dbData.users = users;
 
-    const userIds = [];
-    for (const u of users) {
-      const result = await dbRun(
-        'INSERT INTO users (username, email, password_hash, avatar_color) VALUES (?, ?, ?, ?)',
-        [u.username, u.email, u.password_hash, u.avatar_color]
-      );
-      userIds.push(result.id);
-    }
-
-    // Create seed posts
+    // Seed Posts
     const posts = [
       {
+        id: 1,
         title: 'Mastering Custom Vanilla CSS in a Modern React Era',
         summary: 'Forget CSS-in-JS frameworks or massive utility libraries. Learn how to write high-performance, modular, and beautiful Vanilla CSS variables and grids.',
         content: `### Why Custom Vanilla CSS is Still King
@@ -159,9 +351,12 @@ One of CSS Grid's best features is \`grid-template-columns: repeat(auto-fill, mi
 Let's embrace the simplicity and power of native technologies!`,
         cover_image: 'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&q=80&w=1200',
         category: 'Development',
-        author_id: userIds[0]
+        author_id: 1,
+        created_at: new Date(Date.now() - 3600000 * 24).toISOString(), // 1 day ago
+        updated_at: new Date(Date.now() - 3600000 * 24).toISOString()
       },
       {
+        id: 2,
         title: 'The Art of Glassmorphism: Designing for Depth',
         summary: 'Explore how to create beautiful glass-like panels using backdrop-filters, subtle borders, and gradients to wow your audience.',
         content: `### Creating Visual Layering on the Web
@@ -186,9 +381,12 @@ Glassmorphism has taken the design world by storm. It uses a combination of tran
 Try incorporating this aesthetic into your next dashboard or dashboard cards for instant visual satisfaction!`,
         cover_image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&q=80&w=1200',
         category: 'Design',
-        author_id: userIds[1]
+        author_id: 2,
+        created_at: new Date(Date.now() - 3600000 * 5).toISOString(), // 5 hours ago
+        updated_at: new Date(Date.now() - 3600000 * 5).toISOString()
       },
       {
+        id: 3,
         title: 'Building Lightweight API Gateways with Node.js',
         summary: 'A step-by-step guide to assembling your own routing proxy and load balancer in less than 200 lines of standard Javascript.',
         content: `### Scaling Node.js Microservices
@@ -205,38 +403,27 @@ While tools like Kong or NGINX exist, sometimes a custom gateway built directly 
 Let's build a quick example of a proxy router using \`http-proxy-middleware\` in Node.js...`,
         cover_image: 'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&q=80&w=1200',
         category: 'Tech',
-        author_id: userIds[2]
+        author_id: 3,
+        created_at: new Date(Date.now() - 600000 * 15).toISOString(), // 15 mins ago
+        updated_at: new Date(Date.now() - 600000 * 15).toISOString()
       }
     ];
+    dbData.posts = posts;
 
-    const postIds = [];
-    for (const p of posts) {
-      const result = await dbRun(
-        'INSERT INTO posts (title, summary, content, cover_image, category, author_id) VALUES (?, ?, ?, ?, ?, ?)',
-        [p.title, p.summary, p.content, p.cover_image, p.category, p.author_id]
-      );
-      postIds.push(result.id);
-    }
-
-    // Create seed comments
+    // Seed Comments
     const comments = [
-      { content: 'This is an outstanding writeup! The CSS Grid tip saved me hours of media queries.', post_id: postIds[0], author_id: userIds[1] },
-      { content: 'Agreed, native CSS is extremely strong now. Beautifully styled site btw!', post_id: postIds[0], author_id: userIds[2] },
-      { content: 'Glassmorphism looks incredible but be careful with performance on older mobile browsers.', post_id: postIds[1], author_id: userIds[0] },
-      { content: 'Super helpful. Will use this to design my new personal portfolio dashboard.', post_id: postIds[1], author_id: userIds[2] }
+      { id: 1, content: 'This is an outstanding writeup! The CSS Grid tip saved me hours of media queries.', post_id: 1, author_id: 2, created_at: new Date(Date.now() - 3600000 * 18).toISOString() },
+      { id: 2, content: 'Agreed, native CSS is extremely strong now. Beautifully styled site btw!', post_id: 1, author_id: 3, created_at: new Date(Date.now() - 3600000 * 16).toISOString() },
+      { id: 3, content: 'Glassmorphism looks incredible but be careful with performance on older mobile browsers.', post_id: 2, author_id: 1, created_at: new Date(Date.now() - 3600000 * 4).toISOString() },
+      { id: 4, content: 'Super helpful. Will use this to design my new personal portfolio dashboard.', post_id: 2, author_id: 3, created_at: new Date(Date.now() - 3600000 * 2).toISOString() }
     ];
+    dbData.comments = comments;
 
-    for (const c of comments) {
-      await dbRun(
-        'INSERT INTO comments (content, post_id, author_id) VALUES (?, ?, ?)',
-        [c.content, c.post_id, c.author_id]
-      );
-    }
-
+    saveData();
     console.log('Seeding completed successfully!');
   } catch (error) {
     console.error('Error during seeding:', error);
   }
 };
 
-export default db;
+export default dbData;

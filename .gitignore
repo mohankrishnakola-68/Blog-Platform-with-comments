@@ -7,6 +7,7 @@ frontend/node_modules/
 *.sqlite
 *.db
 backend/database.sqlite
+backend/database.json
 
 # Environment variables & secrets
 .env
