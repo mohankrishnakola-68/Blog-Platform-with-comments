@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import API_BASE from '../api';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Save, Eye, Edit3, ArrowLeft, Image } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -28,7 +29,7 @@ export default function CreateEditPost() {
 
   const loadPost = async () => {
     try {
-      const res = await fetch(`/api/posts/${id}`);
+      const res = await fetch(`${API_BASE}/api/posts/${id}`);
       const data = await res.json();
       if (!res.ok || data.post.author_id !== user?.id) {
         toast.error('Not authorized to edit this post.');
@@ -49,7 +50,7 @@ export default function CreateEditPost() {
     }
     setLoading(true);
     try {
-      const url = isEditing ? `/api/posts/${id}` : '/api/posts';
+      const url = isEditing ? `${API_BASE}/api/posts/${id}` : `${API_BASE}/api/posts`;
       const method = isEditing ? 'PUT' : 'POST';
       const res = await authFetch(url, { method, body: JSON.stringify(form) });
       const data = await res.json();

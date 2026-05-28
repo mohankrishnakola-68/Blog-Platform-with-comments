@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import API_BASE from '../api';
 import { Link, useNavigate } from 'react-router-dom';
 import { PenSquare, Trash2, Edit, BarChart2, MessageSquare, Clock, BookOpen } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -29,7 +30,7 @@ export default function Dashboard() {
   const fetchMyPosts = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/posts?authorId=${user.id}`);
+      const res = await fetch(`${API_BASE}/api/posts?authorId=${user.id}`);
       const data = await res.json();
       setPosts(Array.isArray(data) ? data : []);
     } catch { toast.error('Failed to load posts.'); }
@@ -39,7 +40,7 @@ export default function Dashboard() {
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this post permanently?')) return;
     try {
-      const res = await authFetch(`/api/posts/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/posts/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setPosts(prev => prev.filter(p => p.id !== id));
         toast.success('Post deleted.');

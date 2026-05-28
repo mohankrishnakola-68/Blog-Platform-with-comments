@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "Root orchestration for full-stack blog platform",
   "scripts": {
-    "install-all": "npm.cmd install && npm.cmd install --prefix backend && npm.cmd install --prefix frontend",
-    "server": "npm.cmd run dev --prefix backend",
-    "client": "npm.cmd run dev --prefix frontend",
-    "dev": "concurrently \"npm.cmd run server\" \"npm.cmd run client\""
+    "install-all": "npm install && npm install --prefix backend && npm install --prefix frontend",
+    "server": "node backend/server.js",
+    "client": "npm run dev --prefix frontend",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "build": "npm run build --prefix frontend",
+    "start": "node backend/server.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

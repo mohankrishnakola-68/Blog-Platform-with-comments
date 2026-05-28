@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import API_BASE from '../api';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Search, TrendingUp, Sparkles, PenSquare, Zap } from 'lucide-react';
 import PostCard from '../components/PostCard';
@@ -25,7 +26,7 @@ export default function Home() {
       const params = new URLSearchParams();
       if (activeCategory !== 'All') params.set('category', activeCategory);
       if (q) params.set('search', q);
-      const res = await fetch(`/api/posts?${params}`);
+      const res = await fetch(`${API_BASE}/api/posts?${params}`);
       const data = await res.json();
       setPosts(data);
     } catch {

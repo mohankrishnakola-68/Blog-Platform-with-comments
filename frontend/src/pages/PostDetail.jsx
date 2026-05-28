@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import API_BASE from '../api';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Clock, Calendar, Trash2, Edit, Send, MessageSquare } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -51,7 +52,7 @@ export default function PostDetail() {
   const fetchPost = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/posts/${id}`);
+      const res = await fetch(`${API_BASE}/api/posts/${id}`);
       if (!res.ok) { navigate('/'); return; }
       const data = await res.json();
       setPost(data.post);
@@ -63,7 +64,7 @@ export default function PostDetail() {
   const handleDelete = async () => {
     if (!window.confirm('Delete this post permanently?')) return;
     try {
-      const res = await authFetch(`/api/posts/${id}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/posts/${id}`, { method: 'DELETE' });
       if (res.ok) { toast.success('Post deleted.'); navigate('/'); }
       else { const d = await res.json(); toast.error(d.error); }
     } catch { toast.error('Failed to delete post.'); }
@@ -75,7 +76,7 @@ export default function PostDetail() {
     if (!user) { toast.error('Please log in to comment.'); navigate('/login'); return; }
     setSubmitting(true);
     try {
-      const res = await authFetch(`/api/posts/${id}/comments`, {
+      const res = await authFetch(`${API_BASE}/api/posts/${id}/comments`, {
         method: 'POST',
         body: JSON.stringify({ content: newComment }),
       });
@@ -91,7 +92,7 @@ export default function PostDetail() {
 
   const handleDeleteComment = async (cid) => {
     try {
-      const res = await authFetch(`/api/comments/${cid}`, { method: 'DELETE' });
+      const res = await authFetch(`${API_BASE}/api/comments/${cid}`, { method: 'DELETE' });
       if (res.ok) {
         setComments(prev => prev.filter(c => c.id !== cid));
         toast.success('Comment removed.');
