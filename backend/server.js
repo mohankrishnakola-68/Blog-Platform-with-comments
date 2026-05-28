@@ -48,6 +48,28 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
+// --- DB Init Middleware for Serverless ---
+let dbInitialized = false;
+let initPromise = null;
+
+const ensureDbInitialized = async (req, res, next) => {
+  try {
+    if (!dbInitialized) {
+      if (!initPromise) {
+        initPromise = initDb().then(() => {
+          dbInitialized = true;
+        });
+      }
+      await initPromise;
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+};
+
+app.use(ensureDbInitialized);
+
 // --- API Routes ---
 app.use('/api/auth', authRoutes);
 app.use('/api/posts', postRoutes);
@@ -58,7 +80,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // --- Serve Static Frontend in Production ---
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
   app.use(express.static(path.join(__dirname, '../frontend/dist')));
   // Redirect non-API requests to the React SPA index.html
   app.get(/^(?!\/api).*/, (req, res) => {
@@ -78,9 +100,16 @@ app.use((err, _req, res, _next) => {
 });
 
 // --- Start Server after DB is ready ---
-initDb().then(() => {
-  app.listen(PORT, () => {
-    console.log(`\n🚀 Blog API Server running at http://localhost:${PORT}`);
-    console.log(`📦 SQLite database initialized.\n`);
+if (!process.env.VERCEL) {
+  initDb().then(() => {
+    app.listen(PORT, () => {
+      console.log(`\n🚀 Blog API Server running at http://localhost:${PORT}`);
+      console.log(`📦 SQLite database initialized.\n`);
+    });
   });
-});
+} else {
+  // In Vercel serverless environment, initiate the database connection
+  initDb();
+}
+
+export default app;
